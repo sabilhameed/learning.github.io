@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forecast Accuracy — Explained Like You Mean It</title>
+  <meta name="description" content="An interactive guide to forecast accuracy for Sales, Marketing, Brand, and Finance teams." />
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22&gt;&lt;text y=%22.9em%22 font-size=%2290%22&gt;💄&lt;/text&gt;&lt;/svg&gt;" />
+
+  <!-- ─── No external fonts — using Aptos / Segoe UI / Cascadia Mono (Microsoft 365 native) ─── -->
+
+  <!-- ─── React 18 + Babel standalone (pinned for stability) ─── -->
+  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
+
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      background: #FAF6F0;
+      font-family: 'Aptos', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    /* Loading state shown until React mounts */
+    #loading {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: #FAF6F0; z-index: 9999;
+      transition: opacity 0.4s ease;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    .loading-mark {
+      font-family: 'Aptos Display', 'Aptos', 'Segoe UI', system-ui, sans-serif;
+      font-style: italic; font-weight: 900;
+      font-size: 64px; color: #D4452F;
+      letter-spacing: -0.03em;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    .loading-text {
+      font-family: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+      font-size: 11px; letter-spacing: 0.2em;
+      color: #9A9080; margin-top: 24px;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .err-box {
+      max-width: 600px; margin: 80px auto; padding: 32px;
+      border: 2px solid #D4452F; background: #FBE5DE;
+      font-family: 'Aptos', 'Segoe UI', sans-serif; color: #1A1612;
+    }
+    .err-box h2 { font-family: 'Aptos Display', 'Aptos', 'Segoe UI', sans-serif; font-style: italic; margin-top: 0; }
+    .err-box code { background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 2px; font-size: 12px; }
+  </style>
+</head>
+<body>
+
+  <!-- Loading splash (replaced by React on mount) -->
+  <div id="loading">
+    <div class="loading-mark">FA.</div>
+    <div class="loading-text">PREPARING THE GUIDE…</div>
+  </div>
+
+  <!-- noscript fallback -->
+  <noscript>
+    <div class="err-box">
+      <h2>JavaScript is required.</h2>
+      <p>This interactive guide needs JavaScript to run. Please enable it in your browser, or open this page in Edge or Chrome.</p>
+    </div>
+  </noscript>
+
+  <!-- React mount point -->
+  <div id="root"></div>
+
+  <!-- ─── The artifact (JSX, transpiled in-browser by Babel) ─── -->
+  <script type="text/babel" data-presets="react">
+const { useState, useMemo, useEffect } = React;
+
+
+// ═══════════════════════════════════════════════════════════════════
+// FORECAST ACCURACY — EXPLAINED LIKE YOU MEAN IT
+// An educational walkthrough for Sales, Marketing, Brand, and Finance
+// ═══════════════════════════════════════════════════════════════════
+
+const C = {
+  bg: "#FAF6F0",          // warm cream
+  paper: "#FFFFFF",
+  ink: "#1A1612",         // charcoal
+  inkSub: "#5C5448",
+  inkMute: "#9A9080",
+  hairline: "#E8E0D0",
+  red: "#D4452F",         // coral, for over-forecast / excess
+  redSoft: "#FBE5DE",
+  green: "#5A8A6F",       // sage, for healthy / on-target
+  greenSoft: "#DBE8DD",
+  amber: "#D9921F",       // for under-forecast / lost sale
+  amberSoft: "#F8E8C8",
+  ink2: "#2A1F18",
+};
+
+const F_DISPLAY = `'Aptos Display', 'Aptos', 'Segoe UI', system-ui, -apple-system, sans-serif`;
+const F_BODY = `'Aptos', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+const F_MONO = `'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace`;
+
+// Per-unit economics for the lipstick — used throughout to make consequences concrete
+const UNIT_PRICE = 120;     // AED retail
+const UNIT_COST = 35;       // AED COGS
+const HOLDING_COST_PER_MONTH = 3;  // AED to hold one unit per month
+const MARKDOWN_LOSS = 50;   // AED average loss per unit when marked down
+const LOST_MARGIN = UNIT_PRICE - UNIT_COST; // AED missed per stockout
+
+function ForecastAccuracyExplainer() {
+  return (
+    <div style={{
+      fontFamily: F_BODY, background: C.bg, color: C.ink,
+      minHeight: "100vh", overflow: "hidden",
+    }}>
+      <style>{`
+                * { box-sizing: border-box; }
+        button { font-family: inherit; }
+        .fade-in { animation: fadeIn 0.6s ease-out forwards; }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .lift { transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .grow-bar { transition: width 0.4s ease-out, height 0.4s ease-out, background 0.3s; }
+        input[type="range"] { -webkit-appearance: none; height: 6px; border-radius: 3px; background: ${C.hairline}; outline: none; }
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
+          background: ${C.ink}; cursor: pointer; border: 3px solid ${C.bg};
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        input[type="range"]::-moz-range-thumb {
+          width: 22px; height: 22px; border-radius: 50%;
+          background: ${C.ink}; cursor: pointer; border: 3px solid ${C.bg};
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+      `}</style>
+
+      <Hero />
+      <Chapter1 />
+      <Chapter2 />
+      <Chapter3 />
+      <Chapter4 />
+      <Chapter5 />
+      <Chapter6 />
+      <QuizChapter />
+      <Outro />
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// HERO
+// ═════════════════════════════════════════════════════════════════
+function Hero() {
+  return (
+    <section style={{
+      padding: "80px 32px 120px", maxWidth: 1100, margin: "0 auto",
+      borderBottom: `1px solid ${C.hairline}`,
+    }}>
+      <div style={{ fontFamily: F_MONO, fontSize: 11, letterSpacing: "0.2em", color: C.inkMute, marginBottom: 24 }}>
+        ◆  AN INTERACTIVE GUIDE  ◆  6 CHAPTERS + A QUIZ  ◆  ~10 MINUTES
+      </div>
+      <h1 style={{
+        fontFamily: F_DISPLAY, fontWeight: 900, fontStyle: "italic",
+        fontSize: "clamp(48px, 8vw, 96px)", lineHeight: 0.95, margin: 0,
+        letterSpacing: "-0.03em",
+      }}>
+        Forecast accuracy,<br />
+        <span style={{ color: C.red }}>explained like you mean it.</span>
+      </h1>
+      <p style={{
+        fontSize: 21, lineHeight: 1.5, maxWidth: 680, marginTop: 32,
+        color: C.inkSub, fontWeight: 400,
+      }}>
+        For everyone in Sales, Marketing, Brand, and Finance who keeps hearing the planners
+        say <em style={{ color: C.ink }}>"forecast accuracy was 78% this month"</em> and quietly nods.
+        By the end, you'll know what that actually means — and why it matters to your KPIs, your
+        campaigns, and your customers.
+      </p>
+      <div style={{
+        marginTop: 48, display: "flex", gap: 16, flexWrap: "wrap",
+        fontFamily: F_MONO, fontSize: 11, color: C.inkMute, letterSpacing: "0.08em",
+      }}>
+        <span>↓  SCROLL TO START</span>
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// CHAPTER 1 — Meet the SKU
+// ═════════════════════════════════════════════════════════════════
+function Chapter1() {
+  const [forecast, setForecast] = useState(1000);
+  const [revealed, setRevealed] = useState(false);
+  const ACTUAL = 1380;
+
+  const gap = ACTUAL - forecast;
+  const overOrUnder = forecast > ACTUAL ? "OVER" : forecast < ACTUAL ? "UNDER" : "PERFECT";
+
+  return (
+    <ChapterShell num="01" title="Meet a single lipstick.">
+      <p style={pStyle}>
+        Last month, we needed to forecast demand for one product:
+        <strong> Rouge Velvet N°14</strong>. A bestseller, but seasonal.
+        Before the month begins, you had to commit a number to the supply chain.
+        That number triggers production, shipping, and shelf placement weeks in advance.
+      </p>
+
+      <div style={{
+        background: C.paper, border: `1px solid ${C.hairline}`, padding: 32,
+        marginTop: 32, borderRadius: 4,
+      }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32, alignItems: "center" }}>
+          {/* Lipstick visual */}
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <Lipstick scale={1} />
+          </div>
+          {/* Slider */}
+          <div>
+            <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.2em", color: C.inkMute, marginBottom: 8 }}>
+              YOUR FORECAST  /  UNITS
+            </div>
+            <div style={{
+              fontFamily: F_DISPLAY, fontWeight: 700, fontSize: 56,
+              lineHeight: 1, letterSpacing: "-0.02em", fontFeatureSettings: '"tnum"',
+            }}>
+              {forecast.toLocaleString()}
+            </div>
+            <input
+              type="range" min="500" max="2000" step="50"
+              value={forecast}
+              onChange={(e) => { setForecast(Number(e.target.value)); setRevealed(false); }}
+              style={{ width: "100%", marginTop: 16 }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", fontFamily: F_MONO, fontSize: 10, color: C.inkMute, marginTop: 4 }}>
+              <span>500</span><span>2,000</span>
+            </div>
+          </div>
+        </div>
+
+        {!revealed && (
+          <button
+            onClick={() => setRevealed(true)}
+            style={{
+              marginTop: 32, padding: "14px 28px",
+              background: C.ink, color: C.bg, border: "none",
+              fontFamily: F_MONO, fontSize: 12, letterSpacing: "0.16em",
+              cursor: "pointer", borderRadius: 2,
+            }}
+          >
+            REVEAL WHAT ACTUALLY SOLD  →
+          </button>
+        )}
+
+        {revealed && (
+          <div className="fade-in" style={{ marginTop: 32, paddingTop: 32, borderTop: `1px solid ${C.hairline}` }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
+              <Stat label="YOU FORECAST" value={forecast.toLocaleString()} sub="units" />
+              <Stat label="ACTUAL SALES" value={ACTUAL.toLocaleString()} sub="units" accent={C.ink} />
+              <Stat
+                label="THE GAP"
+                value={`${gap >= 0 ? "+" : ""}${gap.toLocaleString()}`}
+                sub={overOrUnder === "PERFECT" ? "spot on" : overOrUnder === "OVER" ? "over-forecast" : "under-forecast"}
+                accent={overOrUnder === "OVER" ? C.red : overOrUnder === "UNDER" ? C.amber : C.green}
+              />
+            </div>
+
+            <div style={{ marginTop: 32 }}>
+              {overOrUnder === "PERFECT" && (
+                <Insight color={C.green}>
+                  <strong>Bullseye.</strong> You forecast the exact number that sold. In real life
+                  this almost never happens — and if it does, someone got lucky.
+                </Insight>
+              )}
+              {overOrUnder === "OVER" && (
+                <Insight color={C.red}>
+                  <strong>You over-forecast by {Math.abs(gap).toLocaleString()} units.</strong>{" "}
+                  Those units are sitting in the warehouse, costing money to store, eating cash flow,
+                  and heading toward markdown. Roughly{" "}
+                  <strong>AED {(Math.abs(gap) * MARKDOWN_LOSS).toLocaleString()}</strong> in margin
+                  is at risk if we have to discount them.
+                </Insight>
+              )}
+              {overOrUnder === "UNDER" && (
+                <Insight color={C.amber}>
+                  <strong>You under-forecast by {Math.abs(gap).toLocaleString()} units.</strong>{" "}
+                  That's {Math.abs(gap).toLocaleString()} customers who walked into a Sephora,
+                  found an empty shelf, and left.{" "}
+                  <strong>AED {(Math.abs(gap) * LOST_MARGIN).toLocaleString()}</strong> in margin
+                  walked out the door with them. Some of them won't come back.
+                </Insight>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p style={{ ...pStyle, fontStyle: "italic", color: C.inkSub, marginTop: 32 }}>
+        Try the slider. See what it feels like to be 200 units off in either direction.
+        Both sides cost real money — they just cost it differently.
+      </p>
+    </ChapterShell>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// CHAPTER 2 — Both sides hurt, in different ways
+// ═════════════════════════════════════════════════════════════════
+function Chapter2() {
+  const FORECAST = 1000;
+  const [actual, setActual] = useState(700);
+
+  const gap = actual - FORECAST;
+  const isOver = gap < 0;       // forecast > actual → excess
+  const isUnder = gap > 0;      // forecast < actual → stockout
+
+  // Costs
+  const excessUnits = isOver ? Math.abs(gap) : 0;
+  const stockoutUnits = isUnder ? gap : 0;
+  const excessCost = excessUnits * (HOLDING_COST_PER_MONTH + MARKDOWN_LOSS * 0.3); // 30% chance hits markdown
+  const lostRevenue = stockoutUnits * UNIT_PRICE;
+  const lostMargin = stockoutUnits * LOST_MARGIN;
+
+  return (
+    <ChapterShell num="02" title="Both sides hurt — but they hurt differently.">
+      <p style={pStyle}>
+        Here's the trap most people fall into: thinking forecast accuracy is just one number.
+        It isn't. <strong>Over-forecasting and under-forecasting are two completely different
+        diseases.</strong> Same symptom on a spreadsheet (a gap), totally different damage to the
+        business.
+      </p>
+
+      <div style={{
+        background: C.paper, border: `1px solid ${C.hairline}`, padding: 32, marginTop: 32, borderRadius: 4,
+      }}>
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.2em", color: C.inkMute, marginBottom: 8 }}>
+            FORECAST WAS  1,000  /  DRAG TO SET WHAT ACTUALLY SOLD
+          </div>
+          <input
+            type="range" min="400" max="1600" step="50"
+            value={actual}
+            onChange={(e) => setActual(Number(e.target.value))}
+            style={{ width: "100%" }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", fontFamily: F_MONO, fontSize: 10, color: C.inkMute, marginTop: 6 }}>
+            <span>400</span>
+            <span style={{ color: C.ink, fontWeight: 600 }}>ACTUAL: {actual.toLocaleString()} units</span>
+            <span>1,600</span>
+          </div>
+        </div>
+
+        {/* Two-column visual scenario */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 32,
+        }}>
+          {/* Excess scenario */}
+          <ScenarioCard
+            tone="over"
+            active={isOver}
+            label="THE OVER-FORECAST PROBLEM"
+            headline={isOver ? "Excess inventory" : "—"}
+            visual={<WarehouseStack units={excessUnits} />}
+            stats={[
+              { label: "Excess units", value: excessUnits.toLocaleString() },
+              { label: "Holding + markdown risk", value: `AED ${Math.round(excessCost).toLocaleString()}` },
+            ]}
+            consequences={[
+              "Cash tied up in slow-moving stock",
+              "Warehouse space consumed",
+              "Markdown pressure damages brand price perception",
+              "Eventually written off as E&O",
+            ]}
+          />
+
+          {/* Stockout scenario */}
+          <ScenarioCard
+            tone="under"
+            active={isUnder}
+            label="THE UNDER-FORECAST PROBLEM"
+            headline={isUnder ? "Stockouts" : "—"}
+            visual={<EmptyShelf units={stockoutUnits} />}
+            stats={[
+              { label: "Lost units", value: stockoutUnits.toLocaleString() },
+              { label: "Missed revenue", value: `AED ${lostRevenue.toLocaleString()}` },
+            ]}
+            consequences={[
+              "Customers find empty shelves and leave",
+              "Loyalty damaged — they may switch brand",
+              "Marketing campaigns drive traffic to nothing",
+              "Sales team can't hit targets they don't control",
+            ]}
+          />
+        </div>
+
+        {gap === 0 && (
+          <Insight color={C.green}>
+            <strong>You hit it exactly.</strong> No excess, no stockout. This is the goal — and
+            why we measure forecast accuracy religiously. Move the slider to see what happens
+            when reality drifts in either direction.
+          </Insight>
+        )}
+      </div>
+
+      <p style={{ ...pStyle, fontStyle: "italic", color: C.inkSub, marginTop: 32 }}>
+        This is why a planner's least favorite question is{" "}
+        <em>"is the forecast right?"</em> — the right answer is always{" "}
+        <em>"right in which direction, by how much, and for which SKU?"</em>
+      </p>
+    </ChapterShell>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// CHAPTER 3 — Putting a number on it
+// ═════════════════════════════════════════════════════════════════
+function Chapter3() {
+  const FORECAST = 1000;
+  const [actual, setActual] = useState(1380);
+
+  const error = Math.abs(FORECAST - actual);
+  const errorPct = (error / actual) * 100;
+  const accuracy = Math.max(0, 100 - errorPct);
+
+  return (
+    <ChapterShell num="03" title="Now we can put a number on it.">
+      <p style={pStyle}>
+        Once you accept that gaps cost money, the next question is:{" "}
+        <em>how big a gap?</em> That's where the math comes in — and don't worry, it's the same
+        math you'd do without thinking about it.
+      </p>
+
+      <div style={{
+        background: C.paper, border: `1px solid ${C.hairline}`, padding: 32, marginTop: 32, borderRadius: 4,
+      }}>
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.2em", color: C.inkMute, marginBottom: 8 }}>
+            FORECAST: 1,000  /  ACTUAL SALES (DRAG)
+          </div>
+          <input
+            type="range" min="300" max="2000" step="20"
+            value={actual}
+            onChange={(e) => setActual(Number(e.target.value))}
+            style={{ width: "100%" }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", fontFamily: F_MONO, fontSize: 10, color: C.inkMute, marginTop: 6 }}>
+            <span>300</span>
+            <span style={{ color: C.ink, fontWeight: 600 }}>ACTUAL: {actual.toLocaleString()}</span>
+            <span>2,000</span>
+          </div>
+        </div>
+
+        {/* Visual gap bar */}
+        <GapBar forecast={FORECAST} actual={actual} />
+
+        {/* Step-by-step calculation */}
+        <div style={{ marginTop: 32, display: "flex", flexDirection: "column", gap: 12 }}>
+          <CalcStep
+            num="1"
+            label="The gap, in units"
+            formula={`|${FORECAST.toLocaleString()} − ${actual.toLocaleString()}|`}
+            result={`${error.toLocaleString()} units`}
+          />
+          <CalcStep
+            num="2"
+            label="The gap, as a percentage of actual"
+            formula={`${error.toLocaleString()} ÷ ${actual.toLocaleString()} × 100`}
+            result={`${errorPct.toFixed(1)}% error`}
+            accent={C.red}
+          />
+          <CalcStep
+            num="3"
+            label="Flip it — the part we got right"
+            formula={`100% − ${errorPct.toFixed(1)}%`}
+            result={`${accuracy.toFixed(1)}% accuracy`}
+            accent={C.green}
+            big
+          />
+        </div>
+
+        <Insight color={C.ink}>
+          That last number — <strong>forecast accuracy</strong> — is what you'll see on dashboards
+          and in S&OP reviews. It's just a more flattering way of saying{" "}
+          <em>"we were 22% wrong."</em> Same information, more positive spin.
+        </Insight>
+      </div>
+    </ChapterShell>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// CHAPTER 4 — The averaging trap
+// ═════════════════════════════════════════════════════════════════
+function Chapter4() {
+  const skus = [
+    { name: "Hero Foundation",     forecast: 9800, actual: 10000, color: C.ink },
+    { name: "Hero Mascara",        forecast: 14500, actual: 15000, color: C.ink },
+    { name: "Bestseller Lipstick", forecast: 7900, actual: 8000,  color: C.ink },
+    { name: "Niche Eye Liner",     forecast: 100, actual: 50,     color: C.inkMute },
+    { name: "Niche Brow Pencil",   forecast: 80, actual: 30,      color: C.inkMute },
+  ];
+
+  // Simple per-SKU error %
+  const skusEnriched = skus.map(s => ({
+    ...s,
+    errorPct: Math.abs(s.forecast - s.actual) / s.actual * 100,
+    absErr: Math.abs(s.forecast - s.actual),
+  }));
+
+  // Plain average (the trap)
+  const plainAvg = skusEnriched.reduce((sum, s) => sum + s.errorPct, 0) / skusEnriched.length;
+  // Weighted (what planners actually use)
+  const totalActual = skus.reduce((s, x) => s + x.actual, 0);
+  const totalAbsErr = skusEnriched.reduce((s, x) => s + x.absErr, 0);
+  const weightedErrorPct = (totalAbsErr / totalActual) * 100;
+
+  return (
+    <ChapterShell num="04" title="Now we have five products. The math gets sneaky.">
+      <p style={pStyle}>
+        One product is easy. A real portfolio has hundreds. So how do we combine all those
+        accuracy numbers into one headline figure? <strong>This is where it goes wrong for most
+        people.</strong>
+      </p>
+
+      <div style={{
+        background: C.paper, border: `1px solid ${C.hairline}`, padding: 32, marginTop: 32, borderRadius: 4,
+      }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+          <thead>
+            <tr style={{ borderBottom: `2px solid ${C.ink}` }}>
+              <th style={{ ...thStyle, textAlign: "left" }}>SKU</th>
+              <th style={thStyle}>Forecast</th>
+              <th style={thStyle}>Actual</th>
+              <th style={thStyle}>Error %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {skusEnriched.map((s, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.hairline}` }}>
+                <td style={{ ...tdStyle, color: s.color, fontWeight: i < 3 ? 600 : 400 }}>
+                  {s.name}
+                </td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: F_MONO }}>{s.forecast.toLocaleString()}</td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: F_MONO }}>{s.actual.toLocaleString()}</td>
+                <td style={{
+                  ...tdStyle, textAlign: "right", fontFamily: F_MONO, fontWeight: 600,
+                  color: s.errorPct > 30 ? C.red : s.errorPct > 10 ? C.amber : C.green,
+                }}>
+                  {s.errorPct.toFixed(1)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Two contrasting cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 32 }}>
+          <div style={{
+            border: `2px solid ${C.red}`, padding: 20, borderRadius: 4, background: C.redSoft,
+          }}>
+            <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.16em", color: C.red, marginBottom: 8 }}>
+              ✗  THE NAIVE AVERAGE  (a.k.a. MAPE)
+            </div>
+            <div style={{ fontFamily: F_DISPLAY, fontSize: 42, fontWeight: 700, color: C.red, lineHeight: 1 }}>
+              {plainAvg.toFixed(1)}% error
+            </div>
+            <div style={{ fontSize: 13, color: C.ink, marginTop: 12, lineHeight: 1.5 }}>
+              "Just average the error percentages."<br/>
+              <em style={{ color: C.inkSub }}>
+                Two tiny products with huge percentage errors drag the whole portfolio down,
+                even though they barely matter to the business.
+              </em>
+            </div>
+          </div>
+
+          <div style={{
+            border: `2px solid ${C.green}`, padding: 20, borderRadius: 4, background: C.greenSoft,
+          }}>
+            <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.16em", color: C.green, marginBottom: 8 }}>
+              ✓  WEIGHTED BY VOLUME  (a.k.a. WMAPE)
+            </div>
+            <div style={{ fontFamily: F_DISPLAY, fontSize: 42, fontWeight: 700, color: C.green, lineHeight: 1 }}>
+              {weightedErrorPct.toFixed(1)}% error
+            </div>
+            <div style={{ fontSize: 13, color: C.ink, marginTop: 12, lineHeight: 1.5 }}>
+              "Weight every SKU by how much it actually sold."<br/>
+              <em style={{ color: C.inkSub }}>
+                Big sellers count for more — because if you nail forecasts on your top 3,
+                you've nailed 90% of the business.
+              </em>
+            </div>
+          </div>
+        </div>
+
+        <Insight color={C.ink}>
+          <strong>This is why the right metric matters.</strong> The plain average (MAPE) says we
+          had a terrible month. The weighted version (WMAPE) says we were excellent on the SKUs
+          that mattered. <em>Same data. Two stories.</em> When a planner shows you forecast
+          accuracy, ask which version. The honest answer for portfolios is always the weighted one.
+        </Insight>
+      </div>
+    </ChapterShell>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// CHAPTER 5 — Direction matters: Bias
+// ═════════════════════════════════════════════════════════════════
+function Chapter5() {
+  // Two 6-month series with the same accuracy but different bias profiles
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN"];
+  const seriesA = [ // Consistently over-forecasting
+    { f: 1100, a: 1000 }, { f: 1080, a: 980 }, { f: 1150, a: 1050 },
+    { f: 1120, a: 1020 }, { f: 1090, a: 990 }, { f: 1130, a: 1030 },
+  ];
+  const seriesB = [ // Random / bouncing
+    { f: 1100, a: 1000 }, { f: 920, a: 1020 }, { f: 1080, a: 980 },
+    { f: 940, a: 1040 }, { f: 1100, a: 1000 }, { f: 960, a: 1060 },
+  ];
+
+  const summary = (s) => {
+    const totalA = s.reduce((sum, x) => sum + x.a, 0);
+    const totalErr = s.reduce((sum, x) => sum + Math.abs(x.f - x.a), 0);
+    const totalSigned = s.reduce((sum, x) => sum + (x.f - x.a), 0);
+    return {
+      wmape: (totalErr / totalA) * 100,
+      bias: (totalSigned / totalA) * 100,
+    };
+  };
+  const sumA = summary(seriesA);
+  const sumB = summary(seriesB);
+
+  return (
+    <ChapterShell num="05" title="Two forecasts, same accuracy, totally different problems.">
+      <p style={pStyle}>
+        Accuracy on its own doesn't tell you whether you're <em>consistently</em> wrong or
+        <em> randomly</em> wrong. That distinction is huge — one is a fixable process problem,
+        the other is just the nature of demand.
+      </p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 32 }}>
+        <SeriesCard
+          title="Planner A"
+          subtitle="Always a little over."
+          months={months}
+          series={seriesA}
+          wmape={sumA.wmape}
+          bias={sumA.bias}
+          diagnosis="Chronic over-forecasting. Probably an optimism bias, or hedging against stockouts. Easy to fix once you see it: subtract a correction factor."
+          diagnosisColor={C.red}
+        />
+        <SeriesCard
+          title="Planner B"
+          subtitle="Bounces around, balances out."
+          months={months}
+          series={seriesB}
+          wmape={sumB.wmape}
+          bias={sumB.bias}
+          diagnosis="Random error. Sometimes high, sometimes low — but on average, dead on. This is what good forecasting looks like. The remaining error is just demand volatility."
+          diagnosisColor={C.green}
+        />
+      </div>
+
+      <Insight color={C.ink}>
+        Both planners have <strong>almost identical accuracy ({sumA.wmape.toFixed(1)}% vs{" "}
+        {sumB.wmape.toFixed(1)}% error)</strong>. But Planner A leaves a trail of excess inventory
+        every single month. Planner B's misses cancel out. <em>Bias</em> — the direction of error —
+        is the second number you should always ask for.
+      </Insight>
+
+      <p style={{ ...pStyle, fontStyle: "italic", color: C.inkSub, marginTop: 32 }}>
+        Rule of thumb: if you only ever look at one accuracy number,{" "}
+        <strong>look at two</strong> — accuracy AND bias. They're cheap together.
+      </p>
+    </ChapterShell>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// CHAPTER 6 — What this means for YOU
+// ═════════════════════════════════════════════════════════════════
+function Chapter6() {
+  const [role, setRole] = useState("Sales");
+
+  const content = {
+    Sales: {
+      icon: "📊",
+      headline: "Why your targets feel impossible some months.",
+      bullets: [
+        { strong: "Stockouts kill quotas.", body: "If forecast was low and the warehouse runs dry mid-month, your sell-out targets become unreachable through no fault of yours. Track forecast bias by region — chronic under-forecasting is a leading indicator of phantom misses." },
+        { strong: "Excess pressure cuts both ways.", body: "If forecast was high, you'll get push-down promotional asks to clear stock. That eats your margin and trains customers to wait for discounts." },
+        { strong: "Ask: 'what was forecast accuracy AND bias on my top 10 SKUs?'", body: "Portfolio-level numbers can hide problems concentrated in your priority lines." },
+      ],
+    },
+    Marketing: {
+      icon: "📣",
+      headline: "Why your campaigns sometimes fall flat.",
+      bullets: [
+        { strong: "A campaign without stock is a marketing disaster.", body: "When demand creation outpaces forecast, your customer acquisition cost gets wasted on shoppers who find empty shelves. The ROI calculation is brutal — you paid for traffic, you got returns." },
+        { strong: "Always sync activation calendars with the demand plan.", body: "If forecast was set 4 months ago and you launched a new TikTok push 4 weeks ago, the supply chain didn't get the memo. Force the loop." },
+        { strong: "Bias tells you whether marketing is working.", body: "If actual consistently exceeds forecast on your campaign SKUs, that's evidence your campaigns drove uplift. Use it." },
+      ],
+    },
+    Brand: {
+      icon: "💎",
+      headline: "Why forecast accuracy is a brand equity issue.",
+      bullets: [
+        { strong: "Markdowns damage premium positioning.", body: "Every time we over-forecast and have to discount, we're training the customer that this brand goes on sale. For premium and prestige, this is corrosive over years." },
+        { strong: "Stockouts damage trust faster than markdowns.", body: "A loyal customer who can't find your hero product twice in a row will try a competitor. Once they're in the new routine, they're often gone." },
+        { strong: "Hero SKU accuracy = brand experience.", body: "Push for accuracy targets specifically on your icon products — the ones that define the brand. The long tail can be noisy. The hero cannot." },
+      ],
+    },
+    Finance: {
+      icon: "💰",
+      headline: "Why forecast accuracy ties directly to your numbers.",
+      bullets: [
+        { strong: "Inventory is working capital.", body: "Every excess unit is cash on a shelf instead of in the bank. A 2-point WMAPE improvement on a USD 70M business can free up millions in working capital." },
+        { strong: "Markdowns hit margin twice.", body: "Once on the unit you discount, again as a precedent the customer remembers. Provisioning for E&O is the symptom, forecast accuracy is the cause." },
+        { strong: "Lost sales are invisible on the P&L.", body: "Excess shows up as inventory and write-offs — it's measurable. Stockouts disappear into 'soft' brand damage. Don't let invisibility mean unimportant." },
+      ],
+    },
+  };
+
+  const c = content[role];
+
+  return (
+    <ChapterShell num="06" title="So — what does this mean for YOU?">
+      <p style={pStyle}>
+        Forecast accuracy looks like a planning problem. It isn't. It's a cross-functional
+        problem dressed up as a planning metric. Pick your role:
+      </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 24, marginBottom: 24 }}>
+        {Object.keys(content).map((r) => (
+          <button
+            key={r}
+            onClick={() => setRole(r)}
+            style={{
+              padding: "10px 20px",
+              border: `2px solid ${role === r ? C.ink : C.hairline}`,
+              background: role === r ? C.ink : "transparent",
+              color: role === r ? C.bg : C.ink,
+              fontFamily: F_BODY, fontSize: 14, fontWeight: 600,
+              cursor: "pointer", borderRadius: 2,
+              transition: "all 0.15s",
+            }}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+
+      <div className="fade-in" key={role} style={{
+        background: C.paper, border: `1px solid ${C.hairline}`, padding: 36, borderRadius: 4,
+      }}>
+        <div style={{ fontSize: 44, marginBottom: 12 }}>{c.icon}</div>
+        <h3 style={{
+          fontFamily: F_DISPLAY, fontStyle: "italic", fontWeight: 700,
+          fontSize: 32, lineHeight: 1.1, margin: 0, marginBottom: 28, letterSpacing: "-0.02em",
+        }}>
+          {c.headline}
+        </h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {c.bullets.map((b, i) => (
+            <div key={i} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+              <div style={{
+                fontFamily: F_DISPLAY, fontWeight: 900, fontStyle: "italic",
+                fontSize: 24, color: C.red, minWidth: 32, lineHeight: 1,
+              }}>
+                {String(i + 1).padStart(2, "0")}
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, color: C.ink, marginBottom: 4 }}>{b.strong}</div>
+                <div style={{ color: C.inkSub, lineHeight: 1.55 }}>{b.body}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </ChapterShell>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// CHAPTER 7 — TEST YOURSELF
+// ═════════════════════════════════════════════════════════════════
+function QuizChapter() {
+  const questions = [
+    {
+      q: "Last month, your hero lipstick had a forecast of 1,000 units. Actual sales were 1,300 units. Which scenario did we just experience?",
+      options: [
+        "Excess inventory piling up in the warehouse",
+        "Stockouts — customers found empty shelves",
+        "A perfect forecast",
+        "A standard markdown event",
+      ],
+      correct: 1,
+      explain: "Forecast (1,000) was lower than actual demand (1,300) — meaning 300 customers showed up that we didn't plan for. Empty shelves, lost sales, and lost margin walked out with them.",
+    },
+    {
+      q: "If forecast = 800 and actual = 1,000, what's our forecast accuracy?",
+      options: ["120%", "80%", "20%", "Not enough information"],
+      correct: 1,
+      explain: "Error = |800 − 1,000| ÷ 1,000 = 20%. Flip it: 100% − 20% = 80% accuracy. Same calculation regardless of direction — over or under, the gap is the gap.",
+    },
+    {
+      q: "Three hero SKUs forecast within 2%. Two tiny niche SKUs were 80% off. Simple-average error reads 33%. Volume-weighted error reads 3%. Which number is more honest for the business?",
+      options: [
+        "The simple average — every product is equal",
+        "The weighted version — volume reflects business reality",
+        "Both are equally valid, pick whichever",
+        "Always the lower one — execs prefer good news",
+      ],
+      correct: 1,
+      explain: "Plain average treats a 50-unit SKU the same as a 50,000-unit hero. WMAPE weights each error by how much that SKU actually sold — which is exactly how the P&L weights it too.",
+    },
+    {
+      q: "Planner A is consistently 10% over every single month. Planner B's errors bounce randomly between +15% and −15%. Both have similar overall accuracy. Whose pattern is more concerning?",
+      options: [
+        "Planner B — too unpredictable",
+        "Planner A — chronic bias means a systematic, fixable problem we're ignoring",
+        "Neither — same accuracy, same problem",
+        "Both equally — bias is bias",
+      ],
+      correct: 1,
+      explain: "Planner B's errors are demand noise — they cancel out. Planner A is leaving excess inventory every single month, costing real cash. Bias is a process problem you can fix; randomness usually isn't.",
+    },
+    {
+      q: "Marketing launches a major TikTok campaign that drives a demand spike. The forecast was locked in 4 months ago — before anyone knew about the campaign. Most likely outcome?",
+      options: [
+        "Excess inventory and markdowns",
+        "Stockouts and lost sales",
+        "Perfect forecast — campaigns always balance out",
+        "No impact — forecasts adjust in real time",
+      ],
+      correct: 1,
+      explain: "When demand creation outpaces what supply chain planned for, customers find empty shelves. The campaign drove paid traffic to nothing. This is exactly why marketing and demand planning need a shared activation calendar.",
+    },
+    {
+      q: "What's the question to bring to your next S&OP review?",
+      options: [
+        "What was our forecast accuracy this month?",
+        "What was the average MAPE across all SKUs?",
+        "What was our weighted accuracy AND bias on the top 10 SKUs by volume — and is the bias getting better or worse?",
+        "How many SKUs did we forecast?",
+      ],
+      correct: 2,
+      explain: "Three things in one question: weighted (not naïve), top SKUs (where the money is), AND bias (direction matters). Plus the trend — one number is a snapshot, the trend is the story.",
+    },
+  ];
+
+  const [current, setCurrent] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [answers, setAnswers] = useState([]);
+  const [done, setDone] = useState(false);
+
+  const handleSelect = (idx) => {
+    if (selected !== null) return; // lock once answered
+    setSelected(idx);
+    setAnswers([...answers, idx === questions[current].correct]);
+  };
+
+  const handleNext = () => {
+    if (current < questions.length - 1) {
+      setCurrent(current + 1);
+      setSelected(null);
+    } else {
+      setDone(true);
+    }
+  };
+
+  const handleRestart = () => {
+    setCurrent(0);
+    setSelected(null);
+    setAnswers([]);
+    setDone(false);
+  };
+
+  const score = answers.filter(Boolean).length;
+
+  // ─── RESULTS SCREEN ─────────────────────────────────────────────
+  if (done) {
+    const tier =
+      score === 6 ? { label: "Forecast Oracle", color: C.green, msg: "Perfect score. You should be running the S&OP review, not attending it. Frame this and bring it to your next 1:1." } :
+      score >= 4 ? { label: "Solid Grasp", color: C.green, msg: "You'd hold your own in any planning conversation. The math doesn't scare you anymore — and it shouldn't." } :
+      score >= 2 ? { label: "Getting There", color: C.amber, msg: "The fundamentals are landing. A second pass through the chapters will lock in the parts that slipped." } :
+      { label: "Worth Another Read", color: C.red, msg: "No shame — most people who use the word 'forecast' professionally couldn't define WMAPE either. Scroll back up. The second time will stick." };
+
+    return (
+      <ChapterShell num="07" title="So — how did you do?">
+        <div style={{
+          background: C.paper, border: `2px solid ${tier.color}`, padding: 56,
+          borderRadius: 4, textAlign: "center",
+        }}>
+          <div style={{ fontFamily: F_MONO, fontSize: 11, letterSpacing: "0.2em", color: C.inkMute, marginBottom: 16 }}>
+            YOUR SCORE
+          </div>
+          <div style={{
+            fontFamily: F_DISPLAY, fontWeight: 900, fontStyle: "italic",
+            fontSize: "clamp(80px, 14vw, 140px)", lineHeight: 1, color: tier.color,
+            letterSpacing: "-0.04em", fontFeatureSettings: '"tnum"',
+          }}>
+            {score}<span style={{ color: C.hairline, fontWeight: 400 }}>/6</span>
+          </div>
+          <div style={{
+            fontFamily: F_DISPLAY, fontWeight: 700, fontStyle: "italic",
+            fontSize: 36, marginTop: 20, color: C.ink, letterSpacing: "-0.02em",
+          }}>
+            {tier.label}.
+          </div>
+          <div style={{
+            fontSize: 17, color: C.inkSub, marginTop: 16,
+            maxWidth: 560, marginLeft: "auto", marginRight: "auto", lineHeight: 1.55,
+          }}>
+            {tier.msg}
+          </div>
+
+          {/* Question-by-question recap */}
+          <div style={{
+            marginTop: 40, paddingTop: 32, borderTop: `1px solid ${C.hairline}`,
+            display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap",
+          }}>
+            {answers.map((correct, i) => (
+              <div key={i} style={{
+                width: 36, height: 36, borderRadius: "50%",
+                background: correct ? C.greenSoft : C.redSoft,
+                border: `2px solid ${correct ? C.green : C.red}`,
+                color: correct ? C.green : C.red,
+                fontFamily: F_MONO, fontSize: 13, fontWeight: 700,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {correct ? "✓" : "✗"}
+              </div>
+            ))}
+          </div>
+
+          <button onClick={handleRestart} style={{
+            marginTop: 32, padding: "14px 28px", background: C.ink, color: C.bg, border: "none",
+            fontFamily: F_MONO, fontSize: 12, letterSpacing: "0.16em",
+            cursor: "pointer", borderRadius: 2,
+          }}>
+            TRY AGAIN  ↻
+          </button>
+        </div>
+      </ChapterShell>
+    );
+  }
+
+  // ─── QUESTION SCREEN ────────────────────────────────────────────
+  const q = questions[current];
+  const isCorrect = selected === q.correct;
+
+  return (
+    <ChapterShell num="07" title="Test yourself.">
+      <p style={pStyle}>
+        Six questions. No penalty for getting them wrong — the explanations after each one
+        are the real point. Pick what you think, see what's right, and why.
+      </p>
+
+      <div style={{
+        background: C.paper, border: `1px solid ${C.hairline}`, padding: 36,
+        marginTop: 32, borderRadius: 4,
+      }}>
+        {/* Progress bar */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 28 }}>
+          {questions.map((_, i) => (
+            <div key={i} style={{
+              flex: 1, height: 4, borderRadius: 2,
+              background:
+                i < current ? (answers[i] ? C.green : C.red) :
+                i === current ? C.ink : C.hairline,
+              transition: "background 0.3s",
+            }} />
+          ))}
+        </div>
+
+        <div style={{
+          fontFamily: F_MONO, fontSize: 11, letterSpacing: "0.18em",
+          color: C.inkMute, marginBottom: 16,
+        }}>
+          QUESTION  {String(current + 1).padStart(2, "0")}  /  {String(questions.length).padStart(2, "0")}
+        </div>
+
+        <h3 style={{
+          fontFamily: F_DISPLAY, fontWeight: 700, fontSize: "clamp(22px, 3vw, 28px)",
+          lineHeight: 1.25, margin: 0, marginBottom: 28, letterSpacing: "-0.01em",
+        }}>
+          {q.q}
+        </h3>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {q.options.map((opt, i) => {
+            const isSelectedOpt = selected === i;
+            const isCorrectOpt = i === q.correct;
+            let borderCol = C.hairline;
+            let bgCol = "transparent";
+            let badgeBg = C.hairline;
+            let badgeColor = C.inkSub;
+            let badgeChar = String.fromCharCode(65 + i);
+
+            if (selected !== null) {
+              if (isCorrectOpt) {
+                borderCol = C.green;
+                bgCol = C.greenSoft;
+                badgeBg = C.green;
+                badgeColor = "#FFFFFF";
+                badgeChar = "✓";
+              } else if (isSelectedOpt) {
+                borderCol = C.red;
+                bgCol = C.redSoft;
+                badgeBg = C.red;
+                badgeColor = "#FFFFFF";
+                badgeChar = "✗";
+              }
+            }
+
+            return (
+              <button
+                key={i}
+                onClick={() => handleSelect(i)}
+                disabled={selected !== null}
+                onMouseEnter={(e) => {
+                  if (selected === null) e.currentTarget.style.borderColor = C.ink;
+                }}
+                onMouseLeave={(e) => {
+                  if (selected === null) e.currentTarget.style.borderColor = C.hairline;
+                }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 14,
+                  padding: "16px 20px",
+                  border: `2px solid ${borderCol}`,
+                  background: bgCol,
+                  fontFamily: F_BODY, fontSize: 15, color: C.ink,
+                  textAlign: "left",
+                  cursor: selected === null ? "pointer" : "default",
+                  borderRadius: 3, transition: "border-color 0.15s, background 0.2s",
+                  width: "100%",
+                }}
+              >
+                <span style={{
+                  fontFamily: F_MONO, fontSize: 12, fontWeight: 700,
+                  width: 26, height: 26, borderRadius: "50%",
+                  background: badgeBg, color: badgeColor,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  {badgeChar}
+                </span>
+                <span style={{ flex: 1, lineHeight: 1.45 }}>{opt}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Explanation reveal */}
+        {selected !== null && (
+          <div className="fade-in" style={{
+            marginTop: 28, paddingTop: 24, borderTop: `1px solid ${C.hairline}`,
+          }}>
+            <div style={{
+              fontFamily: F_DISPLAY, fontStyle: "italic", fontWeight: 900,
+              fontSize: 32, color: isCorrect ? C.green : C.red, lineHeight: 1, marginBottom: 12,
+              letterSpacing: "-0.02em",
+            }}>
+              {isCorrect ? "Right." : "Not quite."}
+            </div>
+            <div style={{
+              fontSize: 15, color: C.inkSub, lineHeight: 1.6, marginBottom: 24,
+              paddingLeft: 16, borderLeft: `3px solid ${isCorrect ? C.green : C.red}`,
+            }}>
+              {q.explain}
+            </div>
+            <button onClick={handleNext} style={{
+              padding: "12px 24px", background: C.ink, color: C.bg, border: "none",
+              fontFamily: F_MONO, fontSize: 11, letterSpacing: "0.16em",
+              cursor: "pointer", borderRadius: 2,
+            }}>
+              {current < questions.length - 1 ? "NEXT QUESTION  →" : "SEE YOUR SCORE  →"}
+            </button>
+          </div>
+        )}
+      </div>
+    </ChapterShell>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// OUTRO — TL;DR
+// ═════════════════════════════════════════════════════════════════
+function Outro() {
+  return (
+    <section style={{
+      maxWidth: 1100, margin: "0 auto", padding: "120px 32px 80px",
+    }}>
+      <div style={{ fontFamily: F_MONO, fontSize: 11, letterSpacing: "0.2em", color: C.inkMute, marginBottom: 24 }}>
+        ◆  THE TL;DR  ◆
+      </div>
+      <h2 style={{
+        fontFamily: F_DISPLAY, fontWeight: 900, fontStyle: "italic",
+        fontSize: "clamp(36px, 5vw, 56px)", lineHeight: 1.05, margin: 0, letterSpacing: "-0.02em",
+      }}>
+        The five things you now know.
+      </h2>
+
+      <ol style={{
+        marginTop: 40, paddingLeft: 0, listStyle: "none",
+        display: "flex", flexDirection: "column", gap: 20,
+      }}>
+        {[
+          { h: "A forecast is a commitment that costs money to be wrong.", b: "Both directions cost money. Just differently." },
+          { h: "Forecast accuracy is just '100% minus error.'", b: "It's a flatter way to say 'we were 22% off.'" },
+          { h: "For portfolios, weighted accuracy (WMAPE) is the honest number.", b: "Plain average (MAPE) is the one that flatters or panics for the wrong reasons." },
+          { h: "Always pair accuracy with bias.", b: "Accuracy says how big. Bias says which way. Both, together, every time." },
+          { h: "It's a cross-functional metric, not a planning one.", b: "Sales, marketing, brand, and finance all live downstream of forecast quality. Treat it that way." },
+        ].map((it, i) => (
+          <li key={i} style={{
+            display: "grid", gridTemplateColumns: "auto 1fr", gap: 24,
+            paddingBottom: 20, borderBottom: i < 4 ? `1px solid ${C.hairline}` : "none",
+          }}>
+            <div style={{
+              fontFamily: F_DISPLAY, fontWeight: 900, fontStyle: "italic",
+              fontSize: 56, lineHeight: 0.9, color: C.red, letterSpacing: "-0.04em",
+            }}>
+              {String(i + 1).padStart(2, "0")}
+            </div>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1.3, marginBottom: 6 }}>
+                {it.h}
+              </div>
+              <div style={{ fontSize: 16, color: C.inkSub, lineHeight: 1.5 }}>
+                {it.b}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <div style={{
+        marginTop: 64, padding: 32,
+        border: `2px solid ${C.ink}`, borderRadius: 4,
+        background: C.paper,
+      }}>
+        <div style={{ fontFamily: F_MONO, fontSize: 11, letterSpacing: "0.2em", color: C.inkMute, marginBottom: 12 }}>
+          THE QUESTION TO ASK IN YOUR NEXT S&OP MEETING
+        </div>
+        <p style={{
+          fontFamily: F_DISPLAY, fontStyle: "italic", fontWeight: 500,
+          fontSize: 28, lineHeight: 1.3, margin: 0, color: C.ink,
+        }}>
+          "What was our weighted forecast accuracy AND our bias on the top 10 SKUs by volume —
+          and is the bias getting better, worse, or staying the same?"
+        </p>
+      </div>
+
+      <div style={{
+        marginTop: 64, paddingTop: 32, borderTop: `1px solid ${C.hairline}`,
+        fontFamily: F_MONO, fontSize: 11, color: C.inkMute, letterSpacing: "0.08em",
+      }}>
+        END.  /  YOU NOW KNOW MORE THAN 80% OF THE PEOPLE WHO USE THE WORD "FORECAST" PROFESSIONALLY.
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════
+// SHARED COMPONENTS
+// ═════════════════════════════════════════════════════════════════
+function ChapterShell({ num, title, children }) {
+  return (
+    <section style={{
+      padding: "100px 32px", maxWidth: 1100, margin: "0 auto",
+      borderBottom: `1px solid ${C.hairline}`,
+    }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 24, marginBottom: 32 }}>
+        <div style={{
+          fontFamily: F_DISPLAY, fontWeight: 900, fontStyle: "italic",
+          fontSize: 96, color: C.red, lineHeight: 0.9, letterSpacing: "-0.04em",
+        }}>
+          {num}
+        </div>
+        <h2 style={{
+          fontFamily: F_DISPLAY, fontWeight: 700, fontSize: "clamp(28px, 4vw, 44px)",
+          lineHeight: 1.1, margin: 0, letterSpacing: "-0.02em",
+          flex: 1,
+        }}>
+          {title}
+        </h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+const pStyle = { fontSize: 18, lineHeight: 1.6, color: C.inkSub, marginTop: 0 };
+const thStyle = { fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.16em", color: C.inkMute, fontWeight: 500, padding: "10px 8px", textAlign: "right" };
+const tdStyle = { padding: "12px 8px", verticalAlign: "middle" };
+
+function Stat({ label, value, sub, accent = C.ink }) {
+  return (
+    <div>
+      <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.16em", color: C.inkMute, marginBottom: 6 }}>
+        {label}
+      </div>
+      <div style={{
+        fontFamily: F_DISPLAY, fontWeight: 700, fontSize: 36, lineHeight: 1,
+        color: accent, fontFeatureSettings: '"tnum"',
+      }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 12, color: C.inkSub, marginTop: 4 }}>{sub}</div>
+    </div>
+  );
+}
+
+function Insight({ children, color = C.ink }) {
+  return (
+    <div style={{
+      marginTop: 24, paddingLeft: 16,
+      borderLeft: `4px solid ${color}`,
+      fontSize: 16, lineHeight: 1.6, color: C.ink2,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function ScenarioCard({ tone, active, label, headline, visual, stats, consequences }) {
+  const accent = tone === "over" ? C.red : C.amber;
+  const bgSoft = tone === "over" ? C.redSoft : C.amberSoft;
+  return (
+    <div style={{
+      border: `2px solid ${active ? accent : C.hairline}`,
+      background: active ? bgSoft : C.paper,
+      padding: 20, borderRadius: 4,
+      transition: "all 0.3s",
+      opacity: active ? 1 : 0.45,
+    }}>
+      <div style={{ fontFamily: F_MONO, fontSize: 10, letterSpacing: "0.16em", color: accent, marginBottom: 12 }}>
+        {label}
+      </div>
+      <div style={{ fontFamily: F_DISPLAY, fontStyle: "italic", fontWeight: 700, fontSize: 22, marginBottom: 16 }}>
+        {headline}
+      </div>
+      <div style={{ minHeight: 100, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+        {visual}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: `1px solid ${C.hairline}`, borderBottom: `1px solid ${C.hairline}`, marginBottom: 12 }}>
+        {stats.map((s, i) => (
+          <div key={i}>
+            <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.inkMute, letterSpacing: "0.12em" }}>
+              {s.label.toUpperCase()}
+            </div>
+            <div style={{ fontFamily: F_MONO, fontWeight: 700, fontSize: 14, color: C.ink, marginTop: 2 }}>
+              {s.value}
+            </div>
+          </div>
+        ))}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: C.inkSub, lineHeight: 1.5 }}>
+        {consequences.map((c, i) => <li key={i} style={{ marginBottom: 4 }}>{c}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function Lipstick({ scale = 1 }) {
+  return (
+    <svg width={120 * scale} height={200 * scale} viewBox="0 0 120 200">
+      {/* Cap */}
+      <rect x="38" y="20" width="44" height="80" fill="#1A1612" rx="2" />
+      {/* Tube */}
+      <rect x="35" y="100" width="50" height="80" fill="#D4452F" rx="2" />
+      {/* Band */}
+      <rect x="35" y="140" width="50" height="6" fill="#1A1612" />
+      {/* Lipstick top peek */}
+      <ellipse cx="60" cy="20" rx="22" ry="6" fill="#A8351F" />
+      {/* Label */}
+      <rect x="42" y="155" width="36" height="18" fill="#FAF6F0" />
+      <text x="60" y="167" fontFamily="Cascadia Mono, Consolas, monospace" fontSize="6" fill="#1A1612" textAnchor="middle">N°14</text>
+    </svg>
+  );
+}
+
+function WarehouseStack({ units }) {
+  // Visualize excess as stacked boxes
+  const boxes = Math.min(20, Math.ceil(units / 30));
+  if (units === 0) return <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.inkMute }}>No excess</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column-reverse", alignItems: "center", gap: 2 }}>
+      {Array.from({ length: boxes }).map((_, i) => {
+        const w = 60 - (i * 1.5);
+        return (
+          <div key={i} style={{
+            width: w, height: 9,
+            background: C.red, opacity: 0.4 + (i / boxes) * 0.5,
+            borderRadius: 1,
+          }} />
+        );
+      })}
+      <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.red, marginTop: 6, fontWeight: 600 }}>
+        WAREHOUSE
+      </div>
+    </div>
+  );
+}
+
+function EmptyShelf({ units }) {
+  if (units === 0) return <div style={{ fontFamily: F_MONO, fontSize: 11, color: C.inkMute }}>Shelf full</div>;
+  // Show empty hooks / gaps
+  return (
+    <div>
+      <div style={{
+        display: "flex", gap: 6, padding: "12px 8px",
+        borderBottom: `2px solid ${C.amber}`,
+      }}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} style={{
+            width: 12, height: 30,
+            background: i < 1 ? C.amber : "transparent",
+            border: `1px dashed ${C.amber}`,
+            opacity: i < 1 ? 0.4 : 1,
+          }} />
+        ))}
+      </div>
+      <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.amber, marginTop: 6, fontWeight: 600, textAlign: "center" }}>
+        EMPTY SHELF
+      </div>
+    </div>
+  );
+}
+
+function GapBar({ forecast, actual }) {
+  const max = Math.max(forecast, actual);
+  const fW = (forecast / max) * 100;
+  const aW = (actual / max) * 100;
+  const isOver = forecast > actual;
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      {/* Forecast row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <div style={{ width: 80, fontFamily: F_MONO, fontSize: 10, color: C.inkMute, letterSpacing: "0.12em" }}>
+          FORECAST
+        </div>
+        <div style={{ flex: 1, height: 28, background: C.hairline, position: "relative", borderRadius: 2 }}>
+          <div className="grow-bar" style={{
+            width: `${fW}%`, height: "100%", background: C.ink, borderRadius: 2,
+          }} />
+          <span style={{
+            position: "absolute", left: `${Math.min(fW, 92)}%`,
+            top: "50%", transform: "translateY(-50%)", paddingLeft: 8,
+            fontFamily: F_MONO, fontSize: 12, fontWeight: 600,
+          }}>
+            {forecast.toLocaleString()}
+          </span>
+        </div>
+      </div>
+      {/* Actual row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 80, fontFamily: F_MONO, fontSize: 10, color: C.inkMute, letterSpacing: "0.12em" }}>
+          ACTUAL
+        </div>
+        <div style={{ flex: 1, height: 28, background: C.hairline, position: "relative", borderRadius: 2 }}>
+          <div className="grow-bar" style={{
+            width: `${aW}%`, height: "100%",
+            background: isOver ? C.amber : C.red, borderRadius: 2,
+          }} />
+          <span style={{
+            position: "absolute", left: `${Math.min(aW, 92)}%`,
+            top: "50%", transform: "translateY(-50%)", paddingLeft: 8,
+            fontFamily: F_MONO, fontSize: 12, fontWeight: 600,
+          }}>
+            {actual.toLocaleString()}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalcStep({ num, label, formula, result, accent = C.ink, big }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 16,
+      padding: big ? 20 : 14,
+      background: big ? C.greenSoft : C.bg, border: `1px solid ${C.hairline}`, borderRadius: 4,
+    }}>
+      <div style={{
+        fontFamily: F_DISPLAY, fontStyle: "italic", fontWeight: 900,
+        fontSize: 28, color: C.red, minWidth: 32, lineHeight: 1,
+      }}>
+        {num}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: F_MONO, fontSize: 10, color: C.inkMute, letterSpacing: "0.14em", marginBottom: 2 }}>
+          {label.toUpperCase()}
+        </div>
+        <div style={{ fontFamily: F_MONO, fontSize: 14, color: C.inkSub }}>
+          {formula}
+        </div>
+      </div>
+      <div style={{
+        fontFamily: F_DISPLAY, fontWeight: 700, fontStyle: big ? "italic" : "normal",
+        fontSize: big ? 32 : 22, color: accent, fontFeatureSettings: '"tnum"',
+      }}>
+        =  {result}
+      </div>
+    </div>
+  );
+}
+
+function SeriesCard({ title, subtitle, months, series, wmape, bias, diagnosis, diagnosisColor }) {
+  const max = Math.max(...series.flatMap(s => [s.f, s.a]));
+  return (
+    <div style={{
+      background: C.paper, border: `1px solid ${C.hairline}`, padding: 24, borderRadius: 4,
+    }}>
+      <div style={{ fontFamily: F_DISPLAY, fontStyle: "italic", fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 14, color: C.inkSub, marginBottom: 20 }}>{subtitle}</div>
+
+      {/* Mini chart */}
+      <div style={{
+        display: "grid", gridTemplateColumns: `repeat(${months.length}, 1fr)`,
+        gap: 8, height: 80, alignItems: "end", marginBottom: 8,
+      }}>
+        {series.map((s, i) => {
+          const fH = (s.f / max) * 100;
+          const aH = (s.a / max) * 100;
+          return (
+            <div key={i} style={{ display: "flex", gap: 2, alignItems: "end", height: "100%" }}>
+              <div style={{ flex: 1, height: `${fH}%`, background: C.ink, borderRadius: "1px 1px 0 0" }} title={`Forecast: ${s.f}`} />
+              <div style={{ flex: 1, height: `${aH}%`, background: C.red, borderRadius: "1px 1px 0 0" }} title={`Actual: ${s.a}`} />
+            </div>
+          );
+        })}
+      </div>
+      <div style={{
+        display: "grid", gridTemplateColumns: `repeat(${months.length}, 1fr)`,
+        gap: 8, fontFamily: F_MONO, fontSize: 9, color: C.inkMute, letterSpacing: "0.06em",
+        textAlign: "center", marginBottom: 16,
+      }}>
+        {months.map((m) => <div key={m}>{m}</div>)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, fontFamily: F_MONO, fontSize: 10, color: C.inkMute, marginBottom: 16 }}>
+        <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.ink, marginRight: 4 }} /> FORECAST</span>
+        <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.red, marginRight: 4 }} /> ACTUAL</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 16, paddingTop: 16, borderTop: `1px solid ${C.hairline}` }}>
+        <div>
+          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.inkMute, letterSpacing: "0.12em" }}>ERROR</div>
+          <div style={{ fontFamily: F_DISPLAY, fontWeight: 700, fontSize: 22, color: C.ink }}>
+            {wmape.toFixed(1)}%
+          </div>
+        </div>
+        <div>
+          <div style={{ fontFamily: F_MONO, fontSize: 9, color: C.inkMute, letterSpacing: "0.12em" }}>BIAS</div>
+          <div style={{
+            fontFamily: F_DISPLAY, fontWeight: 700, fontSize: 22,
+            color: Math.abs(bias) > 5 ? C.red : C.green,
+          }}>
+            {bias >= 0 ? "+" : ""}{bias.toFixed(1)}%
+          </div>
+        </div>
+      </div>
+
+      <div style={{
+        marginTop: 16, paddingLeft: 12, borderLeft: `3px solid ${diagnosisColor}`,
+        fontSize: 13, color: C.inkSub, lineHeight: 1.5,
+      }}>
+        {diagnosis}
+      </div>
+    </div>
+  );
+}
+
+
+    // Mount the app and dismiss the loading splash
+    try {
+      const rootEl = document.getElementById('root');
+      const root = ReactDOM.createRoot(rootEl);
+      root.render(React.createElement(ForecastAccuracyExplainer));
+      // Fade out loading
+      setTimeout(() => {
+        const loading = document.getElementById('loading');
+        if (loading) {
+          loading.classList.add('hidden');
+          setTimeout(() => loading.remove(), 500);
+        }
+      }, 100);
+    } catch (e) {
+      document.getElementById('root').innerHTML = `
+        <div class="err-box">
+          <h2>Something went wrong.</h2>
+          <p>The interactive guide failed to load. This usually means a corporate firewall is blocking one of the required libraries (React or Babel from <code>unpkg.com</code>).</p>
+          <p><strong>Error:</strong> <code>${e.message}</code></p>
+          <p>Ask your IT team to whitelist <code>unpkg.com</code>, or try opening this file outside the corporate network.</p>
+        </div>`;
+      const loading = document.getElementById('loading');
+      if (loading) loading.remove();
+      console.error(e);
+    }
+  </script>
+
+</body>
+</html>
